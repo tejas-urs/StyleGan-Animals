@@ -1,6 +1,7 @@
 # Dataset (do not upload large files)
 dataset/
 data/
+images/
 
 # Generated outputs
 samples/
