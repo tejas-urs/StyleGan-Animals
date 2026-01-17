@@ -3,6 +3,13 @@ dataset/
 data/
 images/
 
+# Secrets
+kaggle.json
+
+# Kaggle config paths
+.config/kaggle/
+.kaggle/
+
 # Generated outputs
 samples/
 *.png
