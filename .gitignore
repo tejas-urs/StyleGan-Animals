@@ -1,0 +1,22 @@
+# Dataset (do not upload large files)
+dataset/
+data/
+
+# Generated outputs
+samples/
+*.png
+*.jpg
+
+# Model checkpoints
+*.pt
+*.pth
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Jupyter / Colab
+.ipynb_checkpoints/
+
+# Environment
+.env
