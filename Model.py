@@ -1,8 +1,3 @@
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
-
 class MappingNetwork(nn.Module):
     def __init__(self, z_dim=512, w_dim=512):
         super().__init__()
@@ -41,6 +36,10 @@ class StyleConv(nn.Module):
 
 class Generator(nn.Module):
     def __init__(self, z_dim=512, w_dim=512):
+        import torch
+        import torch.nn as nn
+        import torch.nn.functional as F
+        
         super().__init__()
         self.mapping = MappingNetwork(z_dim, w_dim)
         self.const = nn.Parameter(torch.randn(1, 512, 4, 4))
