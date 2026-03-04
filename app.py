@@ -2,6 +2,13 @@ from flask import Flask, render_template_string, send_file
 import io
 from PIL import Image
 
+import torch
+import torchvision.utils as vutils
+
+import os
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+os.environ["OMP_NUM_THREADS"] = "1"
+
 app = Flask(__name__)
 
 # --- CONFIGURATION ---
@@ -15,8 +22,6 @@ generator = None
 def load_gan():
     global generator
     if generator is None:
-        import torch
-        import torchvision.utils as vutils
         from model import Generator
 
         model = Generator().to(DEVICE)
@@ -49,8 +54,6 @@ def index():
 
 @app.route('/generate_image')
 def generate_image():
-    import torch
-    import torchvision.utils as vutils
 
     net = load_gan()
 
