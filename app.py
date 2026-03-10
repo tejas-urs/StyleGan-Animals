@@ -1,13 +1,13 @@
+import os
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+os.environ["OMP_NUM_THREADS"] = "1"
+
 from flask import Flask, render_template_string, send_file
 import io
 from PIL import Image
 
 import torch
 import torchvision.utils as vutils
-
-import os
-os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
-os.environ["OMP_NUM_THREADS"] = "1"
 
 app = Flask(__name__)
 
