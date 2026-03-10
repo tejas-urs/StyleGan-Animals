@@ -22,7 +22,7 @@ generator = None
 def load_gan():
     global generator
     if generator is None:
-        from model import Generator
+        from Model import Generator
 
         model = Generator().to(DEVICE)
         model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
