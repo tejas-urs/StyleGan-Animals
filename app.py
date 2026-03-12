@@ -42,7 +42,7 @@ def load_class_map():
 def load_generator():
     global _generator
     if _generator is None:
-        from model import Generator
+        from Model import Generator
         class_to_idx, _ = load_class_map()
         num_classes = len(class_to_idx)
 
