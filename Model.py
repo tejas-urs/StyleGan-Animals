@@ -1,85 +1,123 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
-class MappingNetwork(nn.Module):
-    def __init__(self, z_dim=512, w_dim=512):
-        super().__init__()
-        layers = []
-        for _ in range(8):
-            layers.append(nn.Linear(w_dim, w_dim))
-            layers.append(nn.LeakyReLU(0.2)) # Standard StyleGAN leakiness
-        self.mapping = nn.Sequential(*layers)
-    
-    def forward(self, z):
-        # Normalize the input latent vector
-        z = z / (z.norm(dim=1, keepdim=True) + 1e-8)
-        return self.mapping(z)
 
-class StyleConv(nn.Module):
-    def __init__(self, in_ch, out_ch, w_dim):
-        super().__init__()
-        self.weight = nn.Parameter(torch.randn(out_ch, in_ch, 3, 3))
-        self.style = nn.Linear(w_dim, in_ch)
-        self.noise_strength = nn.Parameter(torch.zeros(1))
-        self.bias = nn.Parameter(torch.zeros(out_ch))
-    
-    def forward(self, x, w, noise):
-        b, c, h, w_ = x.shape
-        # Weight demodulation/modulation logic
-        style = self.style(w).view(b, 1, c, 1, 1)
-        weight = self.weight.unsqueeze(0) * style
-        weight = weight.view(-1, c, 3, 3)
-
-        x = x.view(1, -1, h, w_)
-        x = F.conv2d(x, weight, padding=1, groups=b)
-        x = x.view(b, -1, h, w_)
-
-        x = x + self.noise_strength * noise
-        return x + self.bias.view(1, -1, 1, 1)
-
+# ──────────────────────────────────────────────
+#  GENERATOR
+#  Takes: noise vector z (B, Z_DIM) + class label (B,)
+#  Outputs: RGB image (B, 3, 64, 64) in range [-1, 1]
+# ──────────────────────────────────────────────
 class Generator(nn.Module):
-    def __init__(self, z_dim=512, w_dim=512):
-        
+    def __init__(self, z_dim=128, num_classes=80, embed_dim=64, feature_map=64):
         super().__init__()
-        self.mapping = MappingNetwork(z_dim, w_dim)
-        self.const = nn.Parameter(torch.randn(1, 512, 4, 4))
-        self.layers = nn.ModuleList([
-            StyleConv(512, 512, w_dim),
-            StyleConv(512, 256, w_dim),
-            StyleConv(256, 128, w_dim),
-            StyleConv(128, 64, w_dim),
-        ])
-        self.to_rgb = nn.Conv2d(64, 3, 1)
+        self.z_dim = z_dim
 
-    def forward(self, z):
-        w = self.mapping(z)
-        x = self.const.repeat(z.size(0), 1, 1, 1)
+        # Class embedding: maps integer label → dense vector
+        self.label_emb = nn.Embedding(num_classes, embed_dim)
 
-        for layer in self.layers:
-            x = F.interpolate(x, scale_factor=2, mode='bilinear', align_corners=False)
-            noise = torch.randn(x.size(0), 1, x.size(2), x.size(3), device=x.device)
-            x = layer(x, w, noise)
-            x = F.leaky_relu(x, 0.2)
+        # Input to first conv = z_dim + embed_dim
+        in_dim = z_dim + embed_dim
 
-        return torch.tanh(self.to_rgb(x))
-
-class Discriminator(nn.Module):
-    def __init__(self):
-        super().__init__()
-        def block(in_c, out_c):
-            return nn.Sequential(
-                nn.Conv2d(in_c, out_c, 4, 2, 1),
-                nn.LeakyReLU(0.2)
-            )
+        # Each ConvTranspose2d doubles the spatial size
+        # 1x1 → 4x4 → 8x8 → 16x16 → 32x32 → 64x64
         self.net = nn.Sequential(
-            block(3, 64),
-            block(64, 128),
-            block(128, 256),
-            block(256, 512),
-            nn.Flatten(),
-            nn.Linear(512*4*4, 1)
+            # Block 1: 1x1 → 4x4
+            nn.ConvTranspose2d(in_dim, feature_map * 8, 4, 1, 0, bias=False),
+            nn.BatchNorm2d(feature_map * 8),
+            nn.ReLU(True),
+
+            # Block 2: 4x4 → 8x8
+            nn.ConvTranspose2d(feature_map * 8, feature_map * 4, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(feature_map * 4),
+            nn.ReLU(True),
+
+            # Block 3: 8x8 → 16x16
+            nn.ConvTranspose2d(feature_map * 4, feature_map * 2, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(feature_map * 2),
+            nn.ReLU(True),
+
+            # Block 4: 16x16 → 32x32
+            nn.ConvTranspose2d(feature_map * 2, feature_map, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(feature_map),
+            nn.ReLU(True),
+
+            # Block 5: 32x32 → 64x64 (output)
+            nn.ConvTranspose2d(feature_map, 3, 4, 2, 1, bias=False),
+            nn.Tanh()  # Output in [-1, 1]
         )
 
-    def forward(self, x):
+        self._init_weights()
+
+    def _init_weights(self):
+        for m in self.modules():
+            if isinstance(m, (nn.ConvTranspose2d, nn.Conv2d)):
+                nn.init.normal_(m.weight, 0.0, 0.02)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.normal_(m.weight, 1.0, 0.02)
+                nn.init.constant_(m.bias, 0)
+
+    def forward(self, z, labels):
+        # Embed label and concatenate with noise
+        emb = self.label_emb(labels)           # (B, embed_dim)
+        x = torch.cat([z, emb], dim=1)         # (B, z_dim + embed_dim)
+        x = x.unsqueeze(2).unsqueeze(3)        # (B, C, 1, 1)
         return self.net(x)
+
+
+# ──────────────────────────────────────────────
+#  DISCRIMINATOR
+#  Takes: RGB image (B, 3, 64, 64) + class label (B,)
+#  Outputs: scalar realness score (B, 1)
+# ──────────────────────────────────────────────
+class Discriminator(nn.Module):
+    def __init__(self, num_classes=80, embed_dim=64, feature_map=64):
+        super().__init__()
+
+        # Project label embedding to a spatial map matching input size
+        self.label_emb = nn.Embedding(num_classes, embed_dim)
+        self.label_proj = nn.Linear(embed_dim, 64 * 64)  # Will reshape to (1, 64, 64)
+
+        # Input channels = 3 (RGB) + 1 (label map) = 4
+        self.net = nn.Sequential(
+            # 64x64 → 32x32
+            nn.Conv2d(4, feature_map, 4, 2, 1, bias=False),
+            nn.LeakyReLU(0.2, inplace=True),
+
+            # 32x32 → 16x16
+            nn.Conv2d(feature_map, feature_map * 2, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(feature_map * 2),
+            nn.LeakyReLU(0.2, inplace=True),
+
+            # 16x16 → 8x8
+            nn.Conv2d(feature_map * 2, feature_map * 4, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(feature_map * 4),
+            nn.LeakyReLU(0.2, inplace=True),
+
+            # 8x8 → 4x4
+            nn.Conv2d(feature_map * 4, feature_map * 8, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(feature_map * 8),
+            nn.LeakyReLU(0.2, inplace=True),
+
+            # 4x4 → 1x1
+            nn.Conv2d(feature_map * 8, 1, 4, 1, 0, bias=False),
+        )
+
+        self._init_weights()
+
+    def _init_weights(self):
+        for m in self.modules():
+            if isinstance(m, (nn.ConvTranspose2d, nn.Conv2d)):
+                nn.init.normal_(m.weight, 0.0, 0.02)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.normal_(m.weight, 1.0, 0.02)
+                nn.init.constant_(m.bias, 0)
+
+    def forward(self, img, labels):
+        # Build spatial label map: (B, 1, 64, 64)
+        emb = self.label_emb(labels)                        # (B, embed_dim)
+        label_map = self.label_proj(emb)                    # (B, 64*64)
+        label_map = label_map.view(-1, 1, 64, 64)           # (B, 1, 64, 64)
+
+        # Concatenate along channel dim → (B, 4, 64, 64)
+        x = torch.cat([img, label_map], dim=1)
+        return self.net(x).view(-1, 1)                      # (B, 1)
