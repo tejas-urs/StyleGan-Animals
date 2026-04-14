@@ -46,7 +46,7 @@ def load_generator():
         class_to_idx, _ = load_class_map()
         num_classes = len(class_to_idx)
 
-        G = Generator(z_dim=Z_DIM, num_classes=num_classes).to(DEVICE)
+        G = Generator(z_dim=Z_DIM, num_classes=num_classes, feature_map=128).to(DEVICE)
         G.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
         G.eval()
         _generator = G
